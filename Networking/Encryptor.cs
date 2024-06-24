@@ -1,4 +1,7 @@
-﻿using System.Security.Cryptography;
+﻿using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Threading.Tasks;
 
 namespace Networking
 {
@@ -12,8 +15,8 @@ namespace Networking
     public sealed class Encryptor : IEncryptor
     {
         private readonly Aes aes = Aes.Create();
-        public string Key => Convert.ToBase64String(aes.Key);
-        public string IV => Convert.ToBase64String(aes.IV);
+        public string Key => Convert.ToBase64String(this.aes.Key);
+        public string IV => Convert.ToBase64String(this.aes.IV);
 
         public Encryptor()
         {
