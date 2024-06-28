@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -9,61 +10,143 @@ using System.Threading.Tasks;
 
 namespace Networking
 {
-    public sealed class Server(ushort port)
+    public sealed class Server(ushort port, byte maxClients = 2)
     {
-        public event EventHandler<string> OnServerEvent;
-        public event EventHandler<string> OnReceiveFromClient;
+        private readonly TcpListener listener = new TcpListener(IPAddress.Any, port);
+        private readonly Dictionary<byte, TcpClient> clients = new Dictionary<byte, TcpClient>();
+        public event EventHandler<string>? OnClientRead;
+        public event EventHandler<string>? OnClientWrite;
+        public event EventHandler<string>? OnServerLog;
 
-        private volatile bool isServerRunning = false;
-        private readonly TcpListener tcpListener = new TcpListener(IPAddress.Any, port);
-        private TcpClient tcpClient;
-        public void Start()
+        public async Task StartListener()
         {
-            this.tcpListener.Start();
-            this.OnServerEvent(this, String.Format("Awaiting Client!"));
-            this.isServerRunning = true;
-            Thread serverThread = new Thread(async () =>
+            try
             {
-                while (this.isServerRunning)
+                this.listener.Start();
+                this.OnServerLog?.Invoke(this, $"TcpListener running on: {port} awaiting {maxClients} clients...");
+
+                Thread clientThread = new Thread(async () =>
                 {
-                    this.tcpClient = await tcpListener.AcceptTcpClientAsync();
-                    this.OnServerEvent(this, String.Format("Client Connected!"));
+                    while (this.clients.Count < maxClients)
+                    {
+                        TcpClient client = await this.listener.AcceptTcpClientAsync();
+                        byte clientId = (byte)(this.clients.Count + 1);
+                        this.clients[clientId] = client;
+                        this.OnServerLog?.Invoke(this, $"TcpClient #{clientId} connected from IP: {(client.Client.RemoteEndPoint as IPEndPoint)?.Address}");
+                        _ = HandleClient(clientId);
+                    }
+                });
+                clientThread.Start();
+                await KeepClientsAlive();
+            }
+            catch (Exception ex)
+            {
+                this.OnServerLog?.Invoke(this, $"TcpListener failed to listen: {ex.Message}");
+            }
+            finally
+            {
+                this.listener.Stop();
+                this.OnServerLog?.Invoke(this, "TcpListener stopped maximum clients reached!");
+            }
+        }
+        public async Task ClientRead(byte clientId, Encoding? encoding = null)
+        {
+            if (!this.clients.TryGetValue(clientId, out TcpClient? client)) 
+                return;
+            encoding ??= Encoding.UTF8;
+            try
+            {
+                using (NetworkStream stream = client.GetStream())
+                {
+                    byte[] buffer = new byte[client.ReceiveBufferSize];
+                    int bytesRead;
+
+                    while (client.Connected && (bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                    {
+                        string message = encoding.GetString(buffer, 0, bytesRead);
+                        this.OnClientRead?.Invoke(client, message);
+                    }
                 }
-            });
-            serverThread.Start();
-        }
-        public void Stop()
-        {
-            this.isServerRunning = false;
-            this.tcpListener.Stop();
-            this.tcpClient.Close();
-        }
-
-        private async void ReceiveFromClient()
-        {
-            if (!this.isServerRunning || !this.tcpClient.Connected)
-            {
-                this.OnServerEvent(this, "Cannot read from client!");
-                return;
             }
-            byte[] buffer = new byte[256];
-            int bytesRead;
-            while ((bytesRead = await this.tcpClient.GetStream().ReadAsync(buffer, 0, buffer.Length)) != 0)
+            catch (Exception ex)
             {
-                byte[] data = new byte[bytesRead];
-                Array.Copy(buffer, data, bytesRead);
-                this.OnReceiveFromClient.Invoke(this, Encoding.ASCII.GetString(data));
+                this.OnServerLog?.Invoke(this, $"Exception reading from client {clientId}: {ex.Message}");
+            }
+            finally
+            {
+                client.Close();
             }
         }
 
-        private async void SendToClient(byte[] data)
+        public async Task ClientWrite(byte clientId, string message, Encoding? encoding = null)
         {
-            if(!this.isServerRunning || !this.tcpClient.Connected)
-            {
-                this.OnServerEvent(this, "Cannot send to client!");
+            if (!this.clients.TryGetValue(clientId, out TcpClient? client) || !client.Connected) 
                 return;
+            encoding ??= Encoding.UTF8;
+            try
+            {
+
+                using (NetworkStream stream = client.GetStream())
+                {
+                    byte[] data = encoding.GetBytes(message);
+                    await stream.WriteAsync(data, 0, data.Length);
+                    await stream.FlushAsync();
+                    this.OnClientWrite?.Invoke(client, message);
+                }
             }
-            await this.tcpClient.GetStream().WriteAsync(data, 0, data.Length);
+            catch (Exception ex)
+            {
+                this.OnServerLog?.Invoke(this, $"Exception writing to client {clientId}: {ex.Message}");
+
+            }
+        }
+
+        private async Task HandleClient(byte clientId)
+        {
+            if (!this.clients.TryGetValue(clientId, out TcpClient? client))
+                return;
+            try
+            {
+                await ClientRead(clientId);
+            }
+            catch (Exception ex)
+            {
+                this.OnServerLog?.Invoke(this, $"Exception handling client {clientId}: {ex.Message}");
+            }
+            finally
+            {
+                if (client.Connected)
+                {
+                    client.Close();
+                    this.OnServerLog?.Invoke(this, $"Client {clientId} disconnected");
+                    this.clients.Remove(clientId);
+                }
+            }
+        }
+
+        private async Task KeepClientsAlive()
+        {
+            try
+            {
+                while (true)
+                {
+                    foreach (var clientId in this.clients.Keys)
+                    {
+                        if (!this.clients[clientId].Connected)
+                        {
+                            this.OnServerLog?.Invoke(this, $"Client {clientId} disconnected unexpectedly");
+                            this.clients.Remove(clientId);
+                            _ = HandleClient(clientId); 
+                        }
+                    }
+
+                    await Task.Delay(5000); 
+                }
+            }
+            catch (Exception ex)
+            {
+                this.OnServerLog?.Invoke(this, $"Exception in KeepClientsAlive: {ex.Message}");
+            }
         }
     }
 }

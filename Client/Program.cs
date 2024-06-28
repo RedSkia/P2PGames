@@ -13,6 +13,8 @@ namespace Client
 
         static void Main(string[] args)
         {
+            Console.WriteLine(Helper.GetFreePort());
+            return;
             Console.Title = "CLIENT";
 
             TcpClient client = new TcpClient(SERVER_IP, PORT_NO);
