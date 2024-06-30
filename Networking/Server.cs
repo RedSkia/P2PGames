@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -10,46 +8,45 @@ using System.Threading.Tasks;
 
 namespace Networking
 {
+
     public sealed class Server(ushort port, byte maxClients = 2, ushort delayMS = 1000)
     {
         private readonly TcpListener listener = new TcpListener(IPAddress.Any, port);
         private readonly Dictionary<byte, TcpClient> clients = new Dictionary<byte, TcpClient>();
+        public IReadOnlyDictionary<byte, TcpClient> Clients => this.clients;
         private volatile bool serverRunning = false;
         public event EventHandler<string>? OnClientRead;
         public event EventHandler<string>? OnClientWrite;
         public event EventHandler<string>? OnServerLog;
-        public void Start()
+
+        public async Task Start()
         {
             try
             {
+                this.OnServerLog?.Invoke(this, $"TcpListener running on: {this.listener.LocalEndpoint} awaiting {maxClients} clients...");
                 this.listener.Start();
-                this.OnServerLog?.Invoke(this, $"TcpListener running on: {port} awaiting {maxClients} clients...");
-                Thread listenerThread = new Thread(async () =>
+                while (this.clients.Count < maxClients)
                 {
-                    while (this.clients.Count < maxClients)
+                    this.OnServerLog?.Invoke(this, "Listening...");
+                    TcpClient client = await this.listener.AcceptTcpClientAsync();
+                    byte clientId = (byte)(this.clients.Count + 1);
+                    string? IPv4 = (client?.Client?.RemoteEndPoint as IPEndPoint)?.Address?.ToString();
+                    this.OnServerLog?.Invoke(this, $"TcpClient #{clientId} connection attempt from IP: {IPv4}");
+                    if (client is not null && !this.clients.TryAdd(clientId, client))
                     {
-                        TcpClient client = await this.listener.AcceptTcpClientAsync();
-                        byte clientId = (byte)(this.clients.Count + 1);
-                        if (!this.clients.TryAdd(clientId, client))
-                        {
-                            this.OnServerLog?.Invoke(this, $"TcpClient #{clientId} failed to connect from IP: {(client.Client.RemoteEndPoint as IPEndPoint)?.Address}");
-                            continue;
-                        }
-                        this.OnServerLog?.Invoke(this, $"TcpClient #{clientId} connected from IP: {(client.Client.RemoteEndPoint as IPEndPoint)?.Address}");
-                        await Task.Delay(delayMS);
+                        this.OnServerLog?.Invoke(this, $"TcpClient #{clientId} failed to connect from IP: {IPv4}");
+                        continue;
                     }
-                });
-                listenerThread.Start();
+                    this.OnServerLog?.Invoke(this, $"TcpClient #{clientId} connected from IP: {IPv4}");
+                    await Task.Delay(delayMS);
+                }
+                this.listener.Stop();
+                this.OnServerLog?.Invoke(this, $"TcpListener stopped maximum clients reached! ({this.clients.Keys.Count}/{maxClients})");
+                await RunServer();
             }
             catch (Exception ex)
             {
                 this.OnServerLog?.Invoke(this, $"TcpListener failed to listen: {ex.Message}");
-            }
-            finally
-            {
-                this.listener.Stop();
-                this.OnServerLog?.Invoke(this, $"TcpListener stopped maximum clients reached! ({this.clients.Keys.Count}/{maxClients})");
-                RunServer();
             }
         }
         public void Stop()
@@ -64,37 +61,28 @@ namespace Networking
                 this.OnServerLog?.Invoke(this, $"TcpListener failed to kill: {ex.Message}");
             }
         }
-
-        private void RunServer()
+        public async Task<bool> ClientWrite(byte clientId, string message, Encoding? encoding = null)
         {
-            if(this.serverRunning)
+            if (!this.clients.TryGetValue(clientId, out TcpClient? client) || !client.Connected) return false;
+            try
             {
-                this.OnServerLog?.Invoke(this, $"ClientServer multi-instance not allowed!");
-                return;
-            }
-            Thread serverThread = new Thread(async () =>
-            {
-                while(this.serverRunning)
+                using (NetworkStream stream = client.GetStream())
                 {
-                    foreach (byte clientId in this.clients.Keys)
-                    {
-                        if (!this.clients[clientId].Connected)
-                        {
-                            this.OnServerLog?.Invoke(this, $"Client {clientId} disconnected unexpectedly");
-                            this.clients.Remove(clientId);
-                            _ = ClientRead(clientId);
-                        }
-                    }
-
-                    await Task.Delay(delayMS);
+                    encoding ??= Encoding.UTF8;
+                    byte[] data = encoding.GetBytes(message);
+                    await stream.WriteAsync(data, 0, data.Length);
+                    await stream.FlushAsync();
+                    this.OnClientWrite?.Invoke(client, message);
                 }
-            });
-            serverThread.Start();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.OnServerLog?.Invoke(this, $"Exception writing to client {clientId}: {ex.Message}");
+                return false;
+            }
         }
-        private void KillServer()
-        {
-            this.serverRunning = false;
-        }
+
         private async Task ClientRead(byte clientId, Encoding? encoding = null)
         {
             if (!this.clients.TryGetValue(clientId, out TcpClient? client)) return;
@@ -111,33 +99,48 @@ namespace Networking
                         string message = encoding.GetString(buffer, 0, bytesRead);
                         this.OnClientRead?.Invoke(client, message);
                     }
+                    await stream.FlushAsync();
                 }
             }
             catch (Exception ex)
             {
-                this.OnServerLog?.Invoke(this, $"Exception reading from client {clientId}: {ex.Message}");
+                this.OnServerLog?.Invoke(this, $"Exception reading from client #{clientId}: {ex.Message}");
             }
         }
-        public async Task<bool> ClientWrite(byte clientId, string message, Encoding? encoding = null)
+
+        private async Task RunServer()
         {
-            if (!this.clients.TryGetValue(clientId, out TcpClient? client) || !client.Connected) return false;
-            try
+            if (this.serverRunning)
             {
-                using (NetworkStream stream = client.GetStream())
+                this.OnServerLog?.Invoke(this, $"ClientServer multi-instance not allowed!");
+                return;
+            }
+            this.serverRunning = true;
+            this.OnServerLog?.Invoke(this, $"ClientServer running!");
+            while (true)
+            {
+                this.OnServerLog?.Invoke(this, $"Server respond!");
+                foreach (byte clientId in this.clients.Keys)
                 {
-                    encoding ??= Encoding.UTF8;
-                    byte[] data = encoding.GetBytes(message);
-                    await stream.WriteAsync(data, 0, data.Length);
-                    await stream.FlushAsync();
-                    this.OnClientWrite?.Invoke(client, message);
-                    return true;
+                    if (!this.clients[clientId].Connected)
+                    {
+                        this.OnServerLog?.Invoke(this, $"Client {clientId} disconnected unexpectedly");
+                        this.clients.Remove(clientId);
+                        continue;
+                    }
+                    Thread thread = new Thread(async () =>
+                    {
+                        await ClientRead(clientId);
+                    });
+                    thread.Start();
                 }
+                await Task.Delay(delayMS);
             }
-            catch (Exception ex)
-            {
-                this.OnServerLog?.Invoke(this, $"Exception writing to client {clientId}: {ex.Message}");
-                return false;
-            }
+        }
+
+        private void KillServer()
+        {
+            this.serverRunning = false;
         }
     }
 }

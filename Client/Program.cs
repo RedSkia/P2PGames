@@ -4,72 +4,22 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Client
+namespace Networking
 {
     internal class Program
     {
-        const int PORT_NO = 7000;
-        const string SERVER_IP = "127.0.0.1";
-
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
-            Console.WriteLine(Helper.GetFreePort());
-            return;
-            Console.Title = "CLIENT";
-
-            TcpClient client = new TcpClient(SERVER_IP, PORT_NO);
-            Console.WriteLine($"Connected to {SERVER_IP}:{PORT_NO}");
-
-            NetworkStream stream = client.GetStream();
-
-            Thread thread = new Thread(ReceiveData);
-            thread.Start(client);
-
-            try
-            {
-
-                while (true)
-                {
-                    string textToSend = Console.ReadLine();
-
-                    byte[] buffer = Encoding.ASCII.GetBytes(textToSend);
-
-                    stream.Write(buffer, 0, buffer.Length);
-                }
-            }
-            catch (Exception)
-            {
-
-                client.Client.Shutdown(SocketShutdown.Both);
-                thread.Join();
-                stream.Close();
-                client.Close();
-                Console.WriteLine("Disconnected!");
-                Console.ReadLine();
-            }
-
-
-
-        }
-
-        private static void ReceiveData(object o)
-        {
-            TcpClient client = (TcpClient)o;
-
-            NetworkStream stream = client.GetStream();
-            byte[] buffer = new byte[1024];
-            int byte_count;
-
+            Client client = new Client("localhost", 12345);
+            client.OnClientLog += (s, log) => Console.WriteLine($"Client Log: {log}");
+            client.OnClientRead += (s, msg) => Console.WriteLine($"Client Received: {msg}");
+            client.OnClientWrite += (s, msg) => Console.WriteLine($"Client Sent: {msg}");
+            await client.Connect();
             while (true)
             {
-                byte_count = stream.Read(buffer, 0, buffer.Length);
-
-                string message = Encoding.ASCII.GetString(buffer, 0, byte_count);
-
-                Console.WriteLine(message);
+                await client.Write(Console.ReadLine());
             }
-
-
+            Console.ReadKey();
         }
     }
 }
