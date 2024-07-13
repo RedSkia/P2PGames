@@ -9,126 +9,148 @@ using System.Threading.Tasks;
 
 namespace Networking
 {
-    public sealed class Server(ushort port, byte maxClients = 2, ushort delayMS = 1000) : IServer
+    public sealed class Server(ushort port, byte maxClients = 2, ushort delayMS = 1000) : NetworkingEvents<(string logMessage, string logLevel)>, IServer
     {
         private readonly TcpListener listener = new TcpListener(IPAddress.Any, port);
         private readonly Dictionary<byte, TcpClient> clients = new Dictionary<byte, TcpClient>();
         private volatile bool running = false;
         private IPEndPoint? endpoint => (this.listener.LocalEndpoint as IPEndPoint);
         public IReadOnlyDictionary<byte, TcpClient> Clients => this.clients;
-        public event EventHandler<(string logMessage, string logLevel)>? OnClientRead;
-        public event EventHandler<(string logMessage, string logLevel)>? OnClientWrite;
-        public event EventHandler<(string logMessage, string logLevel)>? OnServerLog;
+        #region Events
+        public override event EventHandler<(byte clientId, string message)>? OnReceive;
+        public override event EventHandler<(byte clientId, string message)>? OnTransmit;
+        public override event EventHandler<TcpClient>? OnConnection;
+        public override event EventHandler<TcpClient>? OnDisconnect;
+        public override event EventHandler? OnStartup;
+        public override event EventHandler? OnShutdown;
+        public override event EventHandler? OnReady;
+        public override event EventHandler<(string logMessage, string logLevel)>? OnLog;
+        #endregion
         public void Start()
         {
+            this.OnStartup?.Invoke(this, EventArgs.Empty);
             try
             {
                 Thread listenerThread = new Thread(async () =>
                 {
-                    this.OnServerLog?.Invoke(this, ($"Listener thread running", "Info"));
-                    this.OnServerLog?.Invoke(this, ($"TcpListener starting...", "Info"));
+                    this.OnLog?.Invoke(this, ($"Listener thread running", "Info"));
+                    this.OnLog?.Invoke(this, ($"TcpListener starting...", "Info"));
                     this.listener.Start();
-                    this.OnServerLog?.Invoke(this, ($"TcpListener running", "Info"));
-                    this.OnServerLog?.Invoke(this, ($"TcpListener available @ {this.endpoint?.Address}:{this.endpoint?.Port}", "Info"));
+                    this.OnLog?.Invoke(this, ($"TcpListener running", "Info"));
+                    this.OnLog?.Invoke(this, ($"TcpListener available @ {this.endpoint?.Address}:{this.endpoint?.Port}", "Info"));
                     while (this.Clients.Count < maxClients)
                     {
-                        this.OnServerLog?.Invoke(this, ("Listening for clients...", "Info"));
+                        this.OnLog?.Invoke(this, ("TcpListener listening for clients...", "Info"));
                         TcpClient client = await this.listener.AcceptTcpClientAsync();
                         byte clientId = (byte)(this.Clients.Count + 1);
                         string? IPv4 = (client?.Client?.RemoteEndPoint as IPEndPoint)?.Address?.ToString();
-                        this.OnServerLog?.Invoke(this, ($"TcpClient #{clientId} connecting... @ {IPv4}", "Info"));
-                        if (client is not null && !this.clients.TryAdd(clientId, client))
+                        this.OnLog?.Invoke(this, ($"TcpClient #{clientId} connecting... @ {IPv4}", "Info"));
+                        if (client is null || !this.clients.TryAdd(clientId, client))
                         {
-                            this.OnServerLog?.Invoke(this, ($"TcpClient #{clientId} failed to connect @ {IPv4}", "Warn"));
+                            this.OnLog?.Invoke(this, ($"TcpClient #{clientId} failed to connect @ {IPv4}", "Warn"));
                             continue;
                         }
-                        this.OnServerLog?.Invoke(this, ($"TcpClient #{clientId} connected @ {IPv4}", "Info"));
+                        this.OnLog?.Invoke(this, ($"TcpClient #{clientId} connected @ {IPv4}", "Info"));
+                        this.OnConnection?.Invoke(this, client);
                         await Task.Delay(delayMS);
                     }
-                    this.OnServerLog?.Invoke(this, ($"TcpListener stopping maximum clients reached! ({this.Clients.Keys.Count()}/{maxClients})...", "Info"));
+                    this.OnLog?.Invoke(this, ($"TcpListener maximum clients reached! ({this.Clients.Keys.Count()}/{maxClients}) stopping...", "Info"));
                     this.listener.Stop();
-                    this.OnServerLog?.Invoke(this, ($"TcpListener stopped", "Info"));
+                    this.OnLog?.Invoke(this, ($"TcpListener stopped", "Info"));
                     KeepServerAlive();
                 });
-                this.OnServerLog?.Invoke(this, ($"Starting listener thread...", "Info"));
+                this.OnLog?.Invoke(this, ($"Listener thread starting...", "Info"));
                 listenerThread.Start();
             }
             catch (Exception ex)
             {
-                this.OnServerLog?.Invoke(this, ($"Failed to start listener thread: {ex.Message}", "Error"));
+                this.OnLog?.Invoke(this, ($"Listener thread failed to start: {ex.Message}", "Error"));
             }
         }
         public void Stop()
         {
-            this.OnServerLog?.Invoke(this, ($"Stopping server...", "Info"));
+            this.OnLog?.Invoke(this, ($"Server stopping...", "Info"));
             if (!this.running)
             {
-                this.OnServerLog?.Invoke(this, ($"Cannot stop non-running server", "Warn"));
+                this.OnLog?.Invoke(this, ($"Server cannot stop non-running instance", "Warn"));
                 return;
             }
-            this.OnServerLog?.Invoke(this, ($"Stopping server status...", "Info"));
+            this.OnLog?.Invoke(this, ($"Server status stopping...", "Info"));
             this.running = false;
-            this.OnServerLog?.Invoke(this, ($"Server status offline", "Info"));
-            this.OnServerLog?.Invoke(this, ($"Stopping listener...", "Info"));
+            this.OnLog?.Invoke(this, ($"Server status offline", "Info"));
+            this.OnLog?.Invoke(this, ($"Server listener stopping...", "Info"));
             this.listener.Stop();
-            this.OnServerLog?.Invoke(this, ($"Listerner stopped", "Info"));
-            this.OnServerLog?.Invoke(this, ($"Clearing client connections...", "Info"));
+            this.OnLog?.Invoke(this, ($"Server listerner stopped", "Info"));
+            this.OnLog?.Invoke(this, ($"Server clients disconnecting...", "Info"));
             foreach (var client in this.Clients)
             {
-                this.OnServerLog?.Invoke(this, ($"Disconnecting client #{client.Key}...", "Info"));
+                this.OnLog?.Invoke(this, ($"Client #{client.Key} disconnecting...", "Info"));
                 client.Value.Close();
-                this.OnServerLog?.Invoke(this, ($"Client #{client.Key} disconnected", "Info"));
-                this.OnServerLog?.Invoke(this, ($"Removing client #{client.Key}...", "Info"));
+                this.OnDisconnect?.Invoke(this, client.Value);
+                this.OnLog?.Invoke(this, ($"Client #{client.Key} disconnected", "Info"));
+                this.OnLog?.Invoke(this, ($"Client #{client.Key} removing...", "Info"));
                 this.clients.Remove(client.Key);
-                this.OnServerLog?.Invoke(this, ($"Client #{client.Key} removed", "Info"));
+                this.OnLog?.Invoke(this, ($"Client #{client.Key} removed", "Info"));
             }
-            this.OnServerLog?.Invoke(this, ($"Clients connections cleared", "Info"));
+            this.OnLog?.Invoke(this, ($"Server clients disconnected", "Info"));
+            this.OnShutdown?.Invoke(this, EventArgs.Empty);
         }
-        public bool Broadcast(byte clientId, string message) => ClientWrite(clientId, message).Result;
+        public bool Broadcast(string message, byte clientId = 0)
+        {
+            if (clientId > 0) return this.ClientTransmit(clientId, message).Result;
+            else
+            {
+                foreach (var client in this.Clients)
+                    if(!this.ClientTransmit(client.Key, message).Result) { return false; }
+                return true;
+            }
+        }
         private void KeepServerAlive()
         {
             if(this.running)
             {
-                this.OnServerLog?.Invoke(this, ($"Server thread already running multi-instance not allowed", "Warn"));
+                this.OnLog?.Invoke(this, ($"Server thread already running! multi-instance not allowed", "Warn"));
                 return;
             }
             Thread serverThread = new Thread(async () =>
             {
-                this.OnServerLog?.Invoke(this, ($"Server thread running", "Info"));
+                this.OnReady?.Invoke(this, EventArgs.Empty);
+                this.OnLog?.Invoke(this, ($"Server thread running", "Info"));
                 while (this.running)
                 {
                     if(this.Clients.Count() != maxClients)
                     {
-                        this.OnServerLog?.Invoke(this, ($"Server not satisfied with enough clients ({this.Clients.Keys.Count()}/{maxClients})!", "Warn"));
+                        this.OnLog?.Invoke(this, ($"Server not satisfied with enough clients ({this.Clients.Keys.Count()}/{maxClients})!", "Warn"));
                         break;
                     }
-                    this.OnServerLog?.Invoke(this, ($"Server alive!", "Info"));
+                    this.OnLog?.Invoke(this, ($"Server alive!", "Info"));
                     foreach (byte clientId in this.Clients.Keys)
                     {
                         if (!this.Clients[clientId].Connected)
                         {
-                            this.OnServerLog?.Invoke(this, ($"Client #{clientId} disconnected unexpectedly", "Warn"));
+                            this.OnLog?.Invoke(this, ($"Client #{clientId} disconnected unexpectedly", "Warn"));
+                            this.OnDisconnect?.Invoke(this, this.Clients[clientId]);
                             this.clients.Remove(clientId);
                             continue;
                         }
-                        await ClientRead(clientId);
+                        await ClientReceive(clientId);
                     }
                     await Task.Delay(delayMS);
                 }
-                this.OnServerLog?.Invoke(this, ($"Server thread ended", "Info"));
-                this.OnServerLog?.Invoke(this, ($"Server re-starting...", "Warn"));
+                this.OnLog?.Invoke(this, ($"Server thread ended", "Info"));
+                this.OnLog?.Invoke(this, ($"Server re-starting...", "Warn"));
                 this.Stop();
                 this.Start();
             });
-            this.OnServerLog?.Invoke(this, ($"Starting server thread...", "Info"));
+            this.OnLog?.Invoke(this, ($"Server thread starting...", "Info"));
             serverThread.Start();
             this.running = true;
         }
-        private async Task<bool> ClientWrite(byte clientId, string message, Encoding? encoding = null)
+        private async Task<bool> ClientTransmit(byte clientId, string message, Encoding? encoding = null)
         {
             if (!this.Clients.TryGetValue(clientId, out TcpClient? client) || !client.Connected)
             {
-                this.OnServerLog?.Invoke(this, ($"Client #{clientId}: not found or connected", "Warn"));
+                this.OnLog?.Invoke(this, ($"Client #{clientId} not found/connected", "Warn"));
                 return false;
             }
             try
@@ -138,20 +160,21 @@ namespace Networking
                 byte[] data = encoding.GetBytes(message);
                 await stream.WriteAsync(data, 0, data.Length);
                 await stream.FlushAsync();
-                this.OnClientWrite?.Invoke(client, (message, "Info"));
+                this.OnLog?.Invoke(this, (message, "Info"));
+                this.OnTransmit?.Invoke(this, (clientId, message));
                 return true;
             }
             catch (Exception ex)
             {
-                this.OnServerLog?.Invoke(this, ($"Exception writing to client #{clientId}: {ex.Message}", "Error"));
+                this.OnLog?.Invoke(this, ($"Exception client #{clientId} failed to transmit: {ex.Message}", "Error"));
                 return false;
             }
         }
-        private async Task<bool> ClientRead(byte clientId, Encoding? encoding = null)
+        private async Task<bool> ClientReceive(byte clientId, Encoding? encoding = null)
         {
             if (!this.Clients.TryGetValue(clientId, out TcpClient? client))
             {
-                this.OnServerLog?.Invoke(this, ($"Client #{clientId}: not found or connected", "Warn"));
+                this.OnLog?.Invoke(this, ($"Client #{clientId} not found/connected", "Warn"));
                 return false;
             }
             try
@@ -164,14 +187,15 @@ namespace Networking
                 {
                     encoding ??= Encoding.UTF8;
                     string message = encoding.GetString(buffer, 0, bytesRead);
-                    this.OnClientRead?.Invoke(client, (message, "Info"));
+                    this.OnLog?.Invoke(client, (message, "Info"));
+                    this.OnReceive?.Invoke(this, (clientId, message));
                 }
                 await stream.FlushAsync();
                 return true;
             }
             catch (Exception ex)
             {
-                this.OnServerLog?.Invoke(client, ($"Exception reading from client #{clientId}: {ex.Message}", "Error"));
+                this.OnLog?.Invoke(client, ($"Exception client #{clientId} failed to receive: {ex.Message}", "Error"));
                 return false;
             }
         }
