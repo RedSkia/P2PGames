@@ -10,6 +10,18 @@ namespace Networking
     {
         static async Task Main(string[] args)
         {
+            IEncryptor encryptor = new Encryptor("GtLNJ1YrTqeHIvqOt42zaf220KQaQ8X0ARk6cuA+ljs=", "hm9xWUJXb0RzGXEgKaNZEg==");
+            Console.WriteLine($"KEY: {encryptor.Key}");
+            Console.WriteLine($"IV: {encryptor.IV}");
+            string content = "Hello World!";
+            Console.WriteLine($"ORGINAL: {content}");
+            var encrypted = await encryptor.Encrypt(content);
+            var decrypted = await encryptor.Decrypt(encrypted);
+            Console.WriteLine($"ENCRYPTED: {Encoding.UTF8.GetString(encrypted)}");
+            Console.WriteLine($"DECRYPTED: {decrypted}");
+
+            return;
+            var c = new Client();
             Console.WriteLine("Connect?");
             Console.ReadKey();
             var client = new TcpClient();

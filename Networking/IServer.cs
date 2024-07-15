@@ -1,15 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
+using System.Net;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Networking
 {
-    public interface IServer
+    public interface IReadOnlyServer
     {
+        public Encoding Encoding { get; }
+        public IPEndPoint EndPoint { get; }
         public IReadOnlyDictionary<byte, TcpClient> Clients { get; }
+    }
+    public interface IServer : IReadOnlyServer
+    {
         public void Start();
         public void Stop();
-        public bool Broadcast(string message, byte clientId = 0);
+        public bool Post(string content, byte clientId = 0);
     }
 }

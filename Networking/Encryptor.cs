@@ -12,22 +12,37 @@ namespace Networking
         public Task<byte[]> Encrypt(string data);
         public Task<string> Decrypt(byte[] data);
     }
-    public sealed class Encryptor : IEncryptor
+    public sealed class Encryptor : IEncryptor, IDisposable
     {
         private readonly Aes aes = Aes.Create();
         public string Key => Convert.ToBase64String(this.aes.Key);
         public string IV => Convert.ToBase64String(this.aes.IV);
-
-        public Encryptor()
+        public Encryptor(string? key = null, string? iv = null)
         {
             this.aes.KeySize = 256;
             this.aes.BlockSize = 128;
+            this.aes.FeedbackSize = 128;
             this.aes.Mode = CipherMode.CBC;
             this.aes.Padding = PaddingMode.PKCS7;
-            this.aes.GenerateKey();
-            this.aes.GenerateIV();
+            if(key is null || iv is null || !ValidateKeys())
+            {
+                this.aes.GenerateKey();
+                this.aes.GenerateIV();
+            }
+            bool ValidateKeys()
+            {
+                try
+                {
+                    byte[] byteKey = Convert.FromBase64String(key ?? String.Empty);
+                    byte[] byteIv = Convert.FromBase64String(iv ?? String.Empty);
+                    if (byteKey.Length != (this.aes.KeySize / 8) || byteIv.Length is not 16) return false;
+                    this.aes.Key = byteKey;
+                    this.aes.IV = byteIv;
+                    return true;
+                }
+                catch { return false; }
+            }
         }
-
         public async Task<byte[]> Encrypt(string data)
         {
             using (MemoryStream msEncrypt = new MemoryStream())
@@ -55,5 +70,12 @@ namespace Networking
                 }
             }
         }
+        public void Dispose()
+        {
+            this.aes.Key = default!;
+            this.aes.IV = default!;
+            this.aes.Clear();
+        }
+        ~Encryptor() => this.Dispose();
     }
 }

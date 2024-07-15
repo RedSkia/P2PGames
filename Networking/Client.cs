@@ -1,94 +1,104 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Networking
 {
-    public sealed class Client(string serverIp, ushort serverPort)
+    public sealed class Client : NetworkingEvents<(string logMessage, string logLevel)>, IClient
     {
         private readonly TcpClient client = new TcpClient();
-        public event EventHandler<(string logMessage, string logLevel)>? OnClientRead;
-        public event EventHandler<(string logMessage, string logLevel)>? OnClientWrite;
-        public event EventHandler<(string logMessage, string logLevel)>? OnClientLog;
-
-        public async Task Connect()
+        private volatile bool running = false;
+        public async Task<bool> Connect(string host, ushort port)
+        {
+            if(!IPAddress.TryParse(host, out IPAddress? address) || address is null) return false;
+            return await this.Connect(new IPEndPoint(address, port));
+        }
+        public async Task<bool> Connect(IPEndPoint endPoint)
         {
             try
             {
-                this.OnClientLog?.Invoke(this, ($"Client connecting to server...", "Info"));
-                await this.client.ConnectAsync(serverIp, serverPort);
-                this.OnClientLog?.Invoke(this, ($"Client connected to server {serverIp}:{serverPort}", "Info"));
+                await this.client.ConnectAsync(endPoint);
+                this.KeepClientAlive();
+                return true;
             }
             catch (Exception ex)
             {
-                this.OnClientLog?.Invoke(this, ($"Client failed to connect: {ex.Message}", "Error"));
+                return false;
             }
         }
-
-        public async Task Write(string message, Encoding? encoding = null)
+        public bool Disconnect()
         {
-            if (!this.client.Connected)
+            if (this.client!.Connected)
             {
-                this.OnClientLog?.Invoke(this, ("Client cannot write to non-connected server", "Warn"));
+                this.client.Close();
+                return true;
+            }
+            return false;
+        }
+        public async Task<bool> Post(string content) => await this.Transmit(content);
+        private void KeepClientAlive()
+        {
+            if (this.running)
+            {
                 return;
             }
-
-            encoding ??= Encoding.UTF8;
-            byte[] data = encoding.GetBytes(message);
-
+            Thread clientThread = new Thread(async () =>
+            {
+                this.running = true;
+                while (this.running)
+                {
+                    await this.Receive();
+                    await Task.Delay(1000);
+                }
+            });
+            clientThread.Start();
+        }
+        private async Task<bool> Transmit(string content)
+        {
             try
             {
-                using (NetworkStream stream = this.client.GetStream())
+                if (this.client is null || !this.client.Connected)
                 {
-                    await stream.WriteAsync(data, 0, data.Length);
-                    await stream.FlushAsync();
-                    this.OnClientWrite?.Invoke(this, ($"Client sent: {message}", "Info"));
+                    return false;
                 }
-     
+                NetworkStream stream = this.client.GetStream();
+                byte[] bytesData = Encoding.UTF8.GetBytes(content);
+                await stream.WriteAsync(bytesData, 0, bytesData.Length);
+                await stream.FlushAsync();
+                return true;
             }
             catch (Exception ex)
             {
-                this.OnClientLog?.Invoke(this, ($"Client failed to send: {ex.Message}", "Error"));
+                return false;
             }
         }
-
-        public async Task Read(Encoding? encoding = null)
+        private async Task Receive()
         {
-            if (!this.client.Connected)
-            {
-                this.OnClientLog?.Invoke(this, ("Client cannot read to non-connected server", "Warn"));
-                return;
-            }
-
-            encoding ??= Encoding.UTF8;
-            byte[] buffer = new byte[this.client.ReceiveBufferSize];
-
             try
             {
-                using (NetworkStream stream = client.GetStream())
+                if (this.client is null || !this.client.Connected)
                 {
-                    int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                    if (bytesRead > 0)
-                    {
-                        string message = encoding.GetString(buffer, 0, bytesRead);
-                        this.OnClientRead?.Invoke(this, ($"Client received: {message}", "Info"));
-                    }
+                    return;
                 }
-      
+                NetworkStream stream = this.client.GetStream();
+                byte[] buffer = new byte[this.client.ReceiveBufferSize];
+                int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                if (bytesRead > 0)
+                {
+                    string content = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                }
+                await stream.FlushAsync();
             }
             catch (Exception ex)
             {
-                this.OnClientLog?.Invoke(this, ($"Client failed to receive: {ex.Message}", "Error"));
             }
-        }
-
-        public void Close()
-        {
-            this.client.Close();
         }
     }
 }
