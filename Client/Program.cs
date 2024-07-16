@@ -10,16 +10,25 @@ namespace Networking
     {
         static async Task Main(string[] args)
         {
-            IEncryptor encryptor = new Encryptor("GtLNJ1YrTqeHIvqOt42zaf220KQaQ8X0ARk6cuA+ljs=", "hm9xWUJXb0RzGXEgKaNZEg==");
-            Console.WriteLine($"KEY: {encryptor.Key}");
-            Console.WriteLine($"IV: {encryptor.IV}");
-            string content = "Hello World!";
-            Console.WriteLine($"ORGINAL: {content}");
-            var encrypted = await encryptor.Encrypt(content);
-            var decrypted = await encryptor.Decrypt(encrypted);
-            Console.WriteLine($"ENCRYPTED: {Encoding.UTF8.GetString(encrypted)}");
-            Console.WriteLine($"DECRYPTED: {decrypted}");
+            IEncryptor encryptor = new Encryptor();
+            string orginal = "Hello World!";
+            string encrypted1 = await encryptor.Encrypt(orginal);
+            string decrypt1 = await encryptor.Decrypt(encrypted1);
 
+            string encrypted2 = await encryptor.Encrypt(orginal);
+            string decrypt2 = await encryptor.Decrypt(encrypted2);
+
+            Console.WriteLine($"Original: {orginal}");
+            Console.WriteLine();
+
+            Console.WriteLine($"IV: {encryptor.IV}");
+            Console.WriteLine($"Encypted1: {encrypted1}");
+            Console.WriteLine($"Decrypt1: {decrypt1}");
+            Console.WriteLine();
+
+            Console.WriteLine($"IV: {encryptor.IV}");
+            Console.WriteLine($"Encypted2: {encrypted2}");
+            Console.WriteLine($"Decrypt2: {decrypt2}");
             return;
             var c = new Client();
             Console.WriteLine("Connect?");
