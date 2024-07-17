@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Linq;
 
 namespace Networking
 {
@@ -10,6 +11,15 @@ namespace Networking
     {
         static async Task Main(string[] args)
         {
+            TcpClient tcpClient = new TcpClient();
+            Console.WriteLine("Enter Token:");
+            string token = Console.ReadLine();
+            await tcpClient.ConnectAsync("localhost", 12345);
+            Console.WriteLine("Connecting");
+            await tcpClient.GetStream().WriteAsync(Convert.FromBase64String(token));
+            Console.ReadKey();
+            return;
+            /*
             IEncryptor encryptor = new Encryptor();
             string orginal = "Hello World!";
             string encrypted1 = await encryptor.Encrypt(orginal);
@@ -30,7 +40,7 @@ namespace Networking
             Console.WriteLine($"Encypted2: {encrypted2}");
             Console.WriteLine($"Decrypt2: {decrypt2}");
             return;
-            var c = new Client();
+            var c = new TcpConnection();
             Console.WriteLine("Connect?");
             Console.ReadKey();
             var client = new TcpClient();
@@ -47,7 +57,7 @@ namespace Networking
                 }
             }
             Console.ReadKey();
-
+            */
         }
     }
 }

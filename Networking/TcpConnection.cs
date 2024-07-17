@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace Networking
 {
-    public sealed class Client : NetworkingEvents<(string logMessage, string logLevel)>, IClient
+    public sealed class TcpConnection : NetworkingEvents<(string logMessage, string logLevel)>, IClient
     {
         private readonly TcpClient client = new TcpClient();
         private volatile bool running = false;

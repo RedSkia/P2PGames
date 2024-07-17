@@ -12,7 +12,7 @@ namespace Networking
 {
     public static class Helper
     {
-        public static async Task<string> Serialize<T>(T obj)
+        public static async Task<string> Serialize<T>(this T obj)
         {
             await using var stream = new MemoryStream();
             await JsonSerializer.SerializeAsync(stream, obj);

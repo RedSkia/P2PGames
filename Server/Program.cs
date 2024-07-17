@@ -95,9 +95,11 @@ namespace Networking
     {
         static void Main(string[] args)
         {
+            
             ConsoleHelper.Setup();
-            Server server = new Server(12345, 1);
-            server.Post("dadada", 1);
+            string token = new AuthenticationToken();
+            Console.WriteLine($"TOKEN: {token}");
+            Server server = new Server(12345, 1, token: token);
             #region Events
             server.OnConnection += (sender, args) => WriteLog($"Client Connected: {(args.Client.LocalEndPoint as IPEndPoint)?.Address}", "Advert");
             server.OnDisconnect += (sender, args) => WriteLog($"Client Disconnected: {(args.Client.LocalEndPoint as IPEndPoint)?.Address}", "Advert");
@@ -105,7 +107,7 @@ namespace Networking
             server.OnTransmit += (sender, args) => WriteLog($"Server Transmit: client#{args.clientId} {args.content}", "Advert");
             server.OnStartup += (sender, args) => WriteLog($"Server startup", "Advert");
             server.OnShutdown += (sender, args) => WriteLog($"Server shutdown", "Advert");
-           // server.OnReady += (sender, args) => WriteLog($"Server Ready", "Advert");
+            //server.OnReady += (sender, args) => WriteLog($"Server Ready", "Advert");
             server.OnLog += (sender, args) => WriteLog(args.logMessage, args.logLevel);
             #endregion
             server.Start();
@@ -113,6 +115,7 @@ namespace Networking
             {
                 Console.ReadKey(true);
             }
+            
         }
 
         private static readonly object _lock = new object();

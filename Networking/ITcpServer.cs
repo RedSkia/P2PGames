@@ -11,7 +11,7 @@ namespace Networking
         public IPEndPoint EndPoint { get; }
         public IReadOnlyDictionary<byte, TcpClient> Clients { get; }
     }
-    public interface IServer : IReadOnlyServer
+    public interface ITcpServer : IReadOnlyServer
     {
         public void Start();
         public void Stop();
